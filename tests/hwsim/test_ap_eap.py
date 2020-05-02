@@ -2711,7 +2711,7 @@ def test_ap_wpa2_eap_ttls_server_cert_hash(dev, apdev):
     """WPA2-Enterprise connection using EAP-TTLS and server certificate hash"""
     check_cert_probe_support(dev[0])
     skip_with_fips(dev[0])
-    srv_cert_hash = "f6b9d0b2bc3f106ff01542161647036992de889267005d93fac1c7274bfca5bb"
+    srv_cert_hash = "f75a953c1aa9967926525d4d860d1ff7e872f7088782f060768d12aecbd5f25e"
     params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
     hapd = hostapd.add_ap(apdev[0], params)
     dev[0].connect("test-wpa2-eap", key_mgmt="WPA-EAP", eap="TTLS",
@@ -4109,6 +4109,52 @@ def test_ap_wpa2_eap_tls_ocsp_key_id(dev, apdev, params):
                    private_key="auth_serv/user.pkcs12",
                    private_key_passwd="whatever", ocsp=2,
                    scan_freq="2412")
+
+def ocsp_req(outfile):
+    if os.path.exists(outfile):
+        return
+    arg = ["openssl", "ocsp",
+           "-reqout", outfile,
+           '-issuer', 'auth_serv/ca.pem',
+           '-sha256',
+           '-serial', '0xD8D3E3A6CBE3CD5F',
+           '-no_nonce']
+    run_openssl(arg)
+    if not os.path.exists(outfile):
+        raise HwsimSkip("Failed to generate OCSP request")
+
+def ocsp_resp_ca_signed(reqfile, outfile, status):
+    ocsp_req(reqfile)
+    if os.path.exists(outfile):
+        return
+    arg = ["openssl", "ocsp",
+           "-index", "auth_serv/index%s.txt" % status,
+           "-rsigner", "auth_serv/ca.pem",
+           "-rkey", "auth_serv/ca-key.pem",
+           "-CA", "auth_serv/ca.pem",
+           "-ndays", "7",
+           "-reqin", reqfile,
+           "-resp_no_certs",
+           "-respout", outfile]
+    run_openssl(arg)
+    if not os.path.exists(outfile):
+        raise HwsimSkip("No OCSP response available")
+
+def ocsp_resp_server_signed(reqfile, outfile):
+    ocsp_req(reqfile)
+    if os.path.exists(outfile):
+        return
+    arg = ["openssl", "ocsp",
+           "-index", "auth_serv/index.txt",
+           "-rsigner", "auth_serv/server.pem",
+           "-rkey", "auth_serv/server.key",
+           "-CA", "auth_serv/ca.pem",
+           "-ndays", "7",
+           "-reqin", reqfile,
+           "-respout", outfile]
+    run_openssl(arg)
+    if not os.path.exists(outfile):
+        raise HwsimSkip("No OCSP response available")
 
 def test_ap_wpa2_eap_tls_ocsp_ca_signed_good(dev, apdev, params):
     """EAP-TLS and CA signed OCSP response (good)"""
