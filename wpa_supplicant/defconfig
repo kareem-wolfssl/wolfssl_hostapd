@@ -174,7 +174,7 @@ CONFIG_WPS=y
 # registrar.
 #CONFIG_WPS_REG_DISABLE_OPEN=y
 # Enable WPS support with NFC config method
-#CONFIG_WPS_NFC=y
+CONFIG_WPS_NFC=y
 
 # EAP-IKEv2
 CONFIG_EAP_IKEV2=y
@@ -323,7 +323,7 @@ CONFIG_IEEE80211W=y
 # internal = Internal TLSv1 implementation (experimental)
 # linux = Linux kernel AF_ALG and internal TLSv1 implementation (experimental)
 # none = Empty template
-#CONFIG_TLS=openssl
+CONFIG_TLS=wolfssl
 
 # TLS-based EAP methods require at least TLS v1.0. Newer version of TLS (v1.1)
 # can be enabled to get a stronger construction of messages when block ciphers
@@ -612,4 +612,4 @@ CONFIG_BGSCAN_SIMPLE=y
 # Device Provisioning Protocol (DPP)
 # This requires CONFIG_IEEE80211W=y to be enabled, too. (see
 # wpa_supplicant/README-DPP for details)
-CONFIG_DPP=y
+#CONFIG_DPP=y

@@ -125,7 +125,7 @@ CONFIG_EAP_TTLS=y
 # Enable UPnP support for external WPS Registrars
 #CONFIG_WPS_UPNP=y
 # Enable WPS support with NFC config method
-#CONFIG_WPS_NFC=y
+CONFIG_WPS_NFC=y
 
 # EAP-IKEv2
 #CONFIG_EAP_IKEV2=y
@@ -279,7 +279,7 @@ CONFIG_IPV6=y
 # internal = Internal TLSv1 implementation (experimental)
 # linux = Linux kernel AF_ALG and internal TLSv1 implementation (experimental)
 # none = Empty template
-#CONFIG_TLS=openssl
+CONFIG_TLS=wolfssl
 
 # TLS-based EAP methods require at least TLS v1.0. Newer version of TLS (v1.1)
 # can be enabled to get a stronger construction of messages when block ciphers
