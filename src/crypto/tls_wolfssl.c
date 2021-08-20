@@ -20,6 +20,7 @@
 #include <wolfssl/error-ssl.h>
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/openssl/x509v3.h>
+#include <stdbool.h>
 
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || defined(EAP_SERVER_FAST)
 #define HAVE_AESGCM
@@ -1827,9 +1828,17 @@ struct wpabuf * tls_connection_decrypt(void *tls_ctx,
 		return NULL;
 	res = wolfSSL_read(conn->ssl, wpabuf_mhead(buf), wpabuf_size(buf));
 	if (res < 0) {
-		wpa_printf(MSG_INFO, "Decryption failed - SSL_read");
-		wpabuf_free(buf);
-		return NULL;
+		int err = wolfSSL_get_error(conn->ssl, res);
+
+		if (err == SSL_ERROR_WANT_READ) {
+			wpa_printf(MSG_DEBUG,
+				   "SSL: SSL_connect - want more data");
+			res = 0;
+		} else {
+			wpa_printf(MSG_INFO, "Decryption failed - SSL_read");
+			wpabuf_free(buf);
+			return NULL;
+		}
 	}
 	wpabuf_put(buf, res);
 
