@@ -24,6 +24,8 @@ def check_suite_b_tls_lib(dev, dhe=False, level128=False):
     tls = dev[0].request("GET tls_library")
     if tls.startswith("GnuTLS"):
         return
+    if tls.startswith("wolfSSL"):
+        return
     if not tls.startswith("OpenSSL"):
         raise HwsimSkip("TLS library not supported for Suite B: " + tls)
     supported = False
@@ -171,7 +173,9 @@ def suite_b_192_ap_params():
               "eap_user_file": "auth_serv/eap_user.conf",
               "ca_cert": "auth_serv/ec2-ca.pem",
               "server_cert": "auth_serv/ec2-server.pem",
-              "private_key": "auth_serv/ec2-server.key"}
+              "private_key": "auth_serv/ec2-server.key",
+              "tls_flags": "[ENABLE-TLSv1.2]",
+              "tls_session_lifetime": "3600"}
     return params
 
 def test_suite_b_192(dev, apdev):
@@ -188,10 +192,12 @@ def test_suite_b_192(dev, apdev):
                    ca_cert="auth_serv/ec2-ca.pem",
                    client_cert="auth_serv/ec2-user.pem",
                    private_key="auth_serv/ec2-user.key",
-                   pairwise="GCMP-256", group="GCMP-256", scan_freq="2412")
+                   pairwise="GCMP-256", group="GCMP-256", scan_freq="2412",
+                   phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=0 tls_disable_tlsv1_3=1")
     tls_cipher = dev[0].get_status_field("EAP TLS cipher")
     if tls_cipher != "ECDHE-ECDSA-AES256-GCM-SHA384" and \
-       tls_cipher != "ECDHE-ECDSA-AES-256-GCM-AEAD":
+       tls_cipher != "ECDHE-ECDSA-AES-256-GCM-AEAD" and \
+       tls_cipher != "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
         raise Exception("Unexpected TLS cipher: " + tls_cipher)
     cipher = dev[0].get_status_field("mgmt_group_cipher")
     if cipher != "BIP-GMAC-256":

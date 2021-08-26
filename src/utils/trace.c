@@ -156,14 +156,14 @@ static void find_addr_sect(bfd *abfd, asection *section, void *obj)
 	if (data->found)
 		return;
 
-	if (!(bfd_get_section_vma(abfd, section)))
+	if (!(bfd_section_vma(section)))
 		return;
 
-	vma = bfd_get_section_vma(abfd, section);
+	vma = bfd_section_vma(section);
 	if (data->pc < vma)
 		return;
 
-	size = bfd_get_section_size(section);
+	size = bfd_section_size(section);
 	if (data->pc >= vma + size)
 		return;
 

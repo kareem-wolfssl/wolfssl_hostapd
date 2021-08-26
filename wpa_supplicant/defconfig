@@ -613,3 +613,5 @@ CONFIG_BGSCAN_SIMPLE=y
 # This requires CONFIG_IEEE80211W=y to be enabled, too. (see
 # wpa_supplicant/README-DPP for details)
 #CONFIG_DPP=y
+
+CONFIG_SUITEB192=y

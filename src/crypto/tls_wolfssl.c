@@ -99,6 +99,63 @@ struct tls_connection {
     char *peer_subject; /* peer subject info for authenticated peer */
 };
 
+#ifndef WOLFSSL_SSLKEYLOGFILE_OUTPUT
+    #define WOLFSSL_SSLKEYLOGFILE_OUTPUT "sslkeylog.log"
+#endif
+
+
+/* Callback function for TLS v1.3 secrets for use with Wireshark */
+static int Tls13SecretCallback(WOLFSSL* ssl, int id, const unsigned char* secret,
+    int secretSz, void* ctx)
+{
+    int i;
+    const char* str = NULL;
+    unsigned char clientRandom[32];
+    size_t clientRandomSz;
+    XFILE fp = stderr;
+    if (ctx) {
+        fp = XFOPEN((const char*)ctx, "ab");
+        if (fp == XBADFILE) {
+            return BAD_FUNC_ARG;
+        }
+    }
+
+    clientRandomSz = wolfSSL_get_client_random(ssl, clientRandom,
+        sizeof(clientRandom));
+
+    switch (id) {
+        case CLIENT_EARLY_TRAFFIC_SECRET:
+            str = "CLIENT_EARLY_TRAFFIC_SECRET"; break;
+        case EARLY_EXPORTER_SECRET:
+            str = "EARLY_EXPORTER_SECRET"; break;
+        case CLIENT_HANDSHAKE_TRAFFIC_SECRET:
+            str = "CLIENT_HANDSHAKE_TRAFFIC_SECRET"; break;
+        case SERVER_HANDSHAKE_TRAFFIC_SECRET:
+            str = "SERVER_HANDSHAKE_TRAFFIC_SECRET"; break;
+        case CLIENT_TRAFFIC_SECRET:
+            str = "CLIENT_TRAFFIC_SECRET_0"; break;
+        case SERVER_TRAFFIC_SECRET:
+            str = "SERVER_TRAFFIC_SECRET_0"; break;
+        case EXPORTER_SECRET:
+            str = "EXPORTER_SECRET"; break;
+    }
+
+    fprintf(fp, "%s ", str);
+    for (i = 0; i < (int)clientRandomSz; i++) {
+        fprintf(fp, "%02x", clientRandom[i]);
+    }
+    fprintf(fp, " ");
+    for (i = 0; i < secretSz; i++) {
+        fprintf(fp, "%02x", secret[i]);
+    }
+    fprintf(fp, "\n");
+
+    if (fp != stderr) {
+        XFCLOSE(fp);
+    }
+
+    return 0;
+}
 
 static struct tls_context * tls_context_new(const struct tls_config *conf)
 {
@@ -224,7 +281,7 @@ void * tls_init(const struct tls_config *conf)
 	tls_ref_count++;
 
 	/* start as client */
-	ssl_ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
+	ssl_ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
 	if (!ssl_ctx) {
 		tls_ref_count--;
 		if (context != tls_global)
@@ -256,7 +313,15 @@ void * tls_init(const struct tls_config *conf)
 		ciphers = conf->openssl_ciphers;
 	else
 		ciphers = "ALL";
-	if (wolfSSL_CTX_set_cipher_list(ssl_ctx, ciphers) != 1) {
+	if (ciphers && os_strcmp(ciphers, "SUITEB192") == 0) {
+		if (wolfSSL_CTX_set_cipher_list(ssl_ctx, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+			wpa_printf(MSG_INFO,
+				"wolfSSL: Failed to set cipher string '%s'",
+				"ECDHE-ECDSA-AES256-GCM-SHA384");
+			return NULL;
+		}
+	}
+	else if (wolfSSL_CTX_set_cipher_list(ssl_ctx, ciphers) != 1) {
 		wpa_printf(MSG_ERROR,
 			   "wolfSSL: Failed to set cipher string '%s'",
 			   ciphers);
@@ -320,6 +385,8 @@ struct tls_connection * tls_connection_init(void *tls_ctx)
 		return NULL;
 	}
 
+	wolfSSL_set_tls13_secret_cb(conn->ssl, Tls13SecretCallback,
+        (void*)WOLFSSL_SSLKEYLOGFILE_OUTPUT);
 	wolfSSL_SetIOReadCtx(conn->ssl,  &conn->input);
 	wolfSSL_SetIOWriteCtx(conn->ssl, &conn->output);
 	wolfSSL_set_ex_data(conn->ssl, 0, conn);
@@ -1266,6 +1333,8 @@ static void tls_set_conn_flags(WOLFSSL *ssl, unsigned int flags)
 		wolfSSL_set_options(ssl, SSL_OP_NO_TLSv1_1);
 	if (flags & TLS_CONN_DISABLE_TLSv1_2)
 		wolfSSL_set_options(ssl, SSL_OP_NO_TLSv1_2);
+	if (flags & TLS_CONN_DISABLE_TLSv1_3)
+		wolfSSL_set_options(ssl, SSL_OP_NO_TLSv1_3);
 }
 
 
@@ -1311,7 +1380,15 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 		return -1;
 	}
 
-	if (params->openssl_ciphers &&
+	if (params->openssl_ciphers && os_strcmp(params->openssl_ciphers, "SUITEB192") == 0) {
+		if (wolfSSL_set_cipher_list(conn->ssl, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+			wpa_printf(MSG_INFO,
+				"wolfSSL: Failed to set cipher string '%s'",
+				"ECDHE-ECDSA-AES256-GCM-SHA384");
+			return -1;
+		}
+	}
+	else if (params->openssl_ciphers &&
 	    wolfSSL_set_cipher_list(conn->ssl, params->openssl_ciphers) != 1) {
 		wpa_printf(MSG_INFO,
 			   "wolfSSL: Failed to set cipher string '%s'",
@@ -1555,7 +1632,15 @@ int tls_global_set_params(void *tls_ctx,
 		return -1;
 	}
 
-	if (params->openssl_ciphers &&
+	if (params->openssl_ciphers && os_strcmp(params->openssl_ciphers, "SUITEB192") == 0) {
+		if (wolfSSL_CTX_set_cipher_list(tls_ctx, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+			wpa_printf(MSG_INFO,
+				"wolfSSL: Failed to set cipher string '%s'",
+				"ECDHE-ECDSA-AES256-GCM-SHA384");
+			return -1;
+		}
+	}
+	else if (params->openssl_ciphers &&
 	    wolfSSL_CTX_set_cipher_list(tls_ctx,
 					params->openssl_ciphers) != 1) {
 		wpa_printf(MSG_INFO,

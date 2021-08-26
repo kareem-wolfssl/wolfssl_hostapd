@@ -5736,13 +5736,84 @@ def test_ap_wpa2_eap_tls_13(dev, apdev):
     hapd = hostapd.add_ap(apdev[0], params)
 
     tls = dev[0].request("GET tls_library")
-    if "run=OpenSSL 1.1.1" not in tls:
+    if "run=OpenSSL 1.1.1" not in tls and not tls.startswith("wolfSSL"):
         raise HwsimSkip("TLS v1.3 not supported")
     id = eap_connect(dev[0], hapd, "TLS", "tls user",
                      ca_cert="auth_serv/ca.pem",
                      client_cert="auth_serv/user.pem",
                      private_key="auth_serv/user.key",
                      phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0")
+    ver = dev[0].get_status_field("eap_tls_version")
+    if ver != "TLSv1.3":
+        raise Exception("Unexpected TLS version")
+
+    eap_reauth(dev[0], "TLS")
+    dev[0].request("DISCONNECT")
+    dev[0].wait_disconnected()
+    dev[0].request("PMKSA_FLUSH")
+    dev[0].request("RECONNECT")
+    dev[0].wait_connected()
+
+def check_suite_b_capa(dev):
+    if "GCMP" not in dev[0].get_capability("pairwise"):
+        raise HwsimSkip("GCMP not supported")
+    if "BIP-GMAC-128" not in dev[0].get_capability("group_mgmt"):
+        raise HwsimSkip("BIP-GMAC-128 not supported")
+    if "WPA-EAP-SUITE-B" not in dev[0].get_capability("key_mgmt"):
+        raise HwsimSkip("WPA-EAP-SUITE-B not supported")
+    check_suite_b_tls_lib(dev, level128=True)
+
+def check_suite_b_tls_lib(dev, dhe=False, level128=False):
+    tls = dev[0].request("GET tls_library")
+    if tls.startswith("GnuTLS"):
+        return
+    if tls.startswith("wolfSSL"):
+        return
+    if not tls.startswith("OpenSSL"):
+        raise HwsimSkip("TLS library not supported for Suite B: " + tls)
+    supported = False
+    for ver in ['1.0.2', '1.1.0', '1.1.1']:
+        if "build=OpenSSL " + ver in tls and "run=OpenSSL " + ver in tls:
+            supported = True
+            break
+        if not dhe and not level128 and "build=OpenSSL " + ver in tls and "run=BoringSSL" in tls:
+            supported = True
+            break
+    if not supported:
+        raise HwsimSkip("OpenSSL version not supported for Suite B: " + tls)
+
+def suite_b_192_ap_params():
+    params = {"ssid": "test-suite-b",
+              "wpa": "2",
+              "wpa_key_mgmt": "WPA-EAP-SUITE-B-192",
+              "rsn_pairwise": "GCMP-256",
+              "group_mgmt_cipher": "BIP-GMAC-256",
+              "ieee80211w": "2",
+              "ieee8021x": "1",
+              "openssl_ciphers": "SUITEB192",
+              "eap_server": "1",
+              "eap_user_file": "auth_serv/eap_user.conf",
+              "ca_cert": "auth_serv/ec2-ca.pem",
+              "server_cert": "auth_serv/ec2-server.pem",
+              "private_key": "auth_serv/ec2-server.key"}
+              #"tls_flags": "[ENABLE-TLSv1.3]"}
+    return params
+
+def test_ap_wpa3_eap_tls_13(dev, apdev):
+    """WPA3 EAP-TLS and TLS 1.3"""
+    check_suite_b_capa(dev)
+    dev[0].flush_scan_cache()
+    params = suite_b_192_ap_params()
+    hapd = hostapd.add_ap(apdev[0], params)
+
+    tls = dev[0].request("GET tls_library")
+    if "run=OpenSSL 1.1.1" not in tls and not tls.startswith("wolfSSL"):
+        raise HwsimSkip("TLS v1.3 not supported")
+    id = eap_connect(dev[0], hapd, "TLS", "tls user",
+                     ca_cert="auth_serv/ca.pem",
+                     client_cert="auth_serv/user.pem",
+                     private_key="auth_serv/user.key",
+                     phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=0 tls_disable_tlsv1_3=1")
     ver = dev[0].get_status_field("eap_tls_version")
     if ver != "TLSv1.3":
         raise Exception("Unexpected TLS version")
@@ -5769,11 +5840,11 @@ def test_ap_wpa2_eap_tls_13_ec(dev, apdev):
               "tls_flags": "[ENABLE-TLSv1.3]"}
     hapd = hostapd.add_ap(apdev[0], params)
     tls = hapd.request("GET tls_library")
-    if "run=OpenSSL 1.1.1" not in tls:
+    if "run=OpenSSL 1.1.1" not in tls and not tls.startswith("wolfSSL"):
         raise HwsimSkip("TLS v1.3 not supported")
 
     tls = dev[0].request("GET tls_library")
-    if "run=OpenSSL 1.1.1" not in tls:
+    if "run=OpenSSL 1.1.1" not in tls and not tls.startswith("wolfSSL"):
         raise HwsimSkip("TLS v1.3 not supported")
     id = eap_connect(dev[0], hapd, "TLS", "tls user",
                      ca_cert="auth_serv/ec-ca.pem",
