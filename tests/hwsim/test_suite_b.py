@@ -174,8 +174,8 @@ def suite_b_192_ap_params():
               "ca_cert": "auth_serv/ec2-ca.pem",
               "server_cert": "auth_serv/ec2-server.pem",
               "private_key": "auth_serv/ec2-server.key",
-              "tls_flags": "[ENABLE-TLSv1.2]",
               "tls_session_lifetime": "3600"}
+              #"tls_flags": "[ENABLE-TLSv1.3]",
     return params
 
 def test_suite_b_192(dev, apdev):
