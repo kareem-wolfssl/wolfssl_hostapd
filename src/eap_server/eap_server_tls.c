@@ -316,7 +316,8 @@ static void eap_tls_process(struct eap_sm *sm, void *priv,
 	}
 
 	if (!tls_connection_established(sm->ssl_ctx, data->ssl.conn) ||
-	    !tls_connection_resumed(sm->ssl_ctx, data->ssl.conn))
+	    !tls_connection_resumed(sm->ssl_ctx, data->ssl.conn) ||
+		(tls_connection_resumed(sm->ssl_ctx, data->ssl.conn) && data->ssl.tls_v13))
 		return;
 
 	buf = tls_connection_get_success_data(data->ssl.conn);

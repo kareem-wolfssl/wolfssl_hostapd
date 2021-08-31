@@ -174,8 +174,8 @@ def suite_b_192_ap_params():
               "ca_cert": "auth_serv/ec2-ca.pem",
               "server_cert": "auth_serv/ec2-server.pem",
               "private_key": "auth_serv/ec2-server.key",
+              "tls_flags": "[ENABLE-TLSv1.3]",
               "tls_session_lifetime": "3600"}
-              #"tls_flags": "[ENABLE-TLSv1.3]",
     return params
 
 def test_suite_b_192(dev, apdev):
@@ -193,7 +193,7 @@ def test_suite_b_192(dev, apdev):
                    client_cert="auth_serv/ec2-user.pem",
                    private_key="auth_serv/ec2-user.key",
                    pairwise="GCMP-256", group="GCMP-256", scan_freq="2412",
-                   phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=0 tls_disable_tlsv1_3=1")
+                   phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0")
     tls_cipher = dev[0].get_status_field("EAP TLS cipher")
     if tls_cipher != "ECDHE-ECDSA-AES256-GCM-SHA384" and \
        tls_cipher != "ECDHE-ECDSA-AES-256-GCM-AEAD" and \

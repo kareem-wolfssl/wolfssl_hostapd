@@ -224,7 +224,7 @@ void * tls_init(const struct tls_config *conf)
 	tls_ref_count++;
 
 	/* start as client */
-	ssl_ctx = wolfSSL_CTX_new(wolfTLSv1_2_client_method());
+	ssl_ctx = wolfSSL_CTX_new(wolfSSLv23_client_method());
 	if (!ssl_ctx) {
 		tls_ref_count--;
 		if (context != tls_global)
@@ -257,10 +257,10 @@ void * tls_init(const struct tls_config *conf)
 	else
 		ciphers = "ALL";
 	if (ciphers && os_strcmp(ciphers, "SUITEB192") == 0) {
-		if (wolfSSL_CTX_set_cipher_list(ssl_ctx, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+		if (wolfSSL_CTX_set_cipher_list(ssl_ctx, "TLS13-AES256-GCM-SHA384") != 1) {
 			wpa_printf(MSG_INFO,
 				"wolfSSL: Failed to set cipher string '%s'",
-				"ECDHE-ECDSA-AES256-GCM-SHA384");
+				"TLS13-AES256-GCM-SHA384");
 			return NULL;
 		}
 	}
@@ -1322,10 +1322,10 @@ int tls_connection_set_params(void *tls_ctx, struct tls_connection *conn,
 	}
 
 	if (params->openssl_ciphers && os_strcmp(params->openssl_ciphers, "SUITEB192") == 0) {
-		if (wolfSSL_set_cipher_list(conn->ssl, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+		if (wolfSSL_set_cipher_list(conn->ssl, "TLS13-AES256-GCM-SHA384") != 1) {
 			wpa_printf(MSG_INFO,
 				"wolfSSL: Failed to set cipher string '%s'",
-				"ECDHE-ECDSA-AES256-GCM-SHA384");
+				"TLS13-AES256-GCM-SHA384");
 			return -1;
 		}
 	}
@@ -1574,10 +1574,10 @@ int tls_global_set_params(void *tls_ctx,
 	}
 
 	if (params->openssl_ciphers && os_strcmp(params->openssl_ciphers, "SUITEB192") == 0) {
-		if (wolfSSL_CTX_set_cipher_list(tls_ctx, "ECDHE-ECDSA-AES256-GCM-SHA384") != 1) {
+		if (wolfSSL_CTX_set_cipher_list(tls_ctx, "TLS13-AES256-GCM-SHA384") != 1) {
 			wpa_printf(MSG_INFO,
 				"wolfSSL: Failed to set cipher string '%s'",
-				"ECDHE-ECDSA-AES256-GCM-SHA384");
+				"TLS13-AES256-GCM-SHA384");
 			return -1;
 		}
 	}
