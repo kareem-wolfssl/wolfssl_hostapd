@@ -197,7 +197,8 @@ def test_suite_b_192(dev, apdev):
     tls_cipher = dev[0].get_status_field("EAP TLS cipher")
     if tls_cipher != "ECDHE-ECDSA-AES256-GCM-SHA384" and \
        tls_cipher != "ECDHE-ECDSA-AES-256-GCM-AEAD" and \
-       tls_cipher != "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384":
+       tls_cipher != "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384" and \
+       tls_cipher != "TLS_AES_256_GCM_SHA384":
         raise Exception("Unexpected TLS cipher: " + tls_cipher)
     cipher = dev[0].get_status_field("mgmt_group_cipher")
     if cipher != "BIP-GMAC-256":
