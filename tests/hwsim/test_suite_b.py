@@ -188,12 +188,10 @@ def test_suite_b_192(dev, apdev):
     dev[0].connect("test-suite-b", key_mgmt="WPA-EAP-SUITE-B-192",
                    ieee80211w="2",
                    openssl_ciphers="SUITEB192",
-                   eap="TLS", identity="tls user",
-                   ca_cert="auth_serv/ec2-ca.pem",
-                   client_cert="auth_serv/ec2-user.pem",
-                   private_key="auth_serv/ec2-user.key",
+                   eap="ttls", identity="pap user",
+                   ca_cert="auth_serv/ca.pem",
                    pairwise="GCMP-256", group="GCMP-256", scan_freq="2412",
-                   phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0")
+                   phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", phase2="auth=PAP")
     tls_cipher = dev[0].get_status_field("EAP TLS cipher")
     if tls_cipher != "ECDHE-ECDSA-AES256-GCM-SHA384" and \
        tls_cipher != "ECDHE-ECDSA-AES-256-GCM-AEAD" and \

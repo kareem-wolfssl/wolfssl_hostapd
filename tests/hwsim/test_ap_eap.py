@@ -137,7 +137,7 @@ def eap_connect(dev, hapd, method, identity,
                 sha256=False, expect_failure=False, local_error_report=False,
                 maybe_local_error=False, report_failure=False,
                 expect_cert_error=None, **kwargs):
-    id = dev.connect("test-wpa2-eap", key_mgmt="WPA-EAP WPA-EAP-SHA256",
+    id = dev.connect("test-wpa2-eap", key_mgmt="WPA-EAP-SUITE-B-192",
                      eap=method, identity=identity,
                      wait_connect=False, scan_freq="2412", ieee80211w="1",
                      **kwargs)
@@ -224,7 +224,7 @@ def eap_check_auth(dev, method, initial, rsn=True, sha256=False,
     if sha256:
         e = "WPA2-EAP-SHA256"
     elif rsn:
-        e = "WPA2/IEEE 802.1X/EAP"
+        e = "WPA2-EAP-SUITE-B-192"
     else:
         e = "WPA/IEEE 802.1X/EAP"
     if status["key_mgmt"] != e:
@@ -1344,20 +1344,34 @@ def _test_ap_wpa2_eap_aka_prime_ext(dev, apdev):
     if ev is None:
         raise Exception("Wait for external SIM processing request timed out")
 
-def test_ap_wpa2_eap_ttls_pap(dev, apdev):
-    """WPA2-Enterprise connection using EAP-TTLS/PAP"""
+def test_ap_wpa3_eap_ttls_pap(dev, apdev):
+    """WPA3-Enterprise connection using EAP-TTLS/PAP"""
     params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    params["wpa_key_mgmt"] = "WPA-EAP-SUITE-B-192"
+    params["rsn_pairwise"] = "GCMP-256"
+    params["group_mgmt_cipher"] = "BIP-GMAC-256"
+    params["ieee80211w"] = "2"
+    params["ieee8021x"] = "1"
+    params["openssl_ciphers"] = ["SUITEB192"]
+    params["eap_server"] = "1"
+    params["eap_user_file"] = "auth_serv/eap_user.conf"
+    params['tls_flags'] = "[ENABLE-TLSv1.3]"
+    params['tls_session_lifetime'] = "3600"
+    params["ca_cert"] = "auth_serv/ec2-ca.pem"
+    params["server_cert"] = "auth_serv/ec2-server.pem"
+    params["private_key"] = "auth_serv/ec2-server.key"
     hapd = hostapd.add_ap(apdev[0], params)
     key_mgmt = hapd.get_config()['key_mgmt']
-    if key_mgmt.split(' ')[0] != "WPA-EAP":
+    if key_mgmt.split(' ')[0] != "WPA-EAP-SUITE-B-192":
         raise Exception("Unexpected GET_CONFIG(key_mgmt): " + key_mgmt)
-    eap_connect(dev[0], hapd, "TTLS", "pap user",
-                anonymous_identity="ttls", password="password",
-                ca_cert="auth_serv/ca.pem", phase2="auth=PAP")
+    eap_connect(dev[0], hapd, "TTLS", "pap user", openssl_ciphers="SUITEB192",
+                anonymous_identity="ttls", password="password", pairwise="GCMP-256", group="GCMP-256",
+                ca_cert="auth_serv/ec2-ca.pem", client_cert="auth_serv/ec2-user.pem", private_key="auth_serv/ec2-user.key",
+                phase2="auth=PAP", phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0")
     hwsim_utils.test_connectivity(dev[0], hapd)
     eap_reauth(dev[0], "TTLS")
-    check_mib(dev[0], [("dot11RSNAAuthenticationSuiteRequested", "00-0f-ac-1"),
-                       ("dot11RSNAAuthenticationSuiteSelected", "00-0f-ac-1")])
+    check_mib(dev[0], [("dot11RSNAAuthenticationSuiteRequested", "00-0f-ac-12"),
+                       ("dot11RSNAAuthenticationSuiteSelected", "00-0f-ac-12")])
 
 def test_ap_wpa2_eap_ttls_pap_subject_match(dev, apdev):
     """WPA2-Enterprise connection using EAP-TTLS/PAP and (alt)subject_match"""
@@ -1995,6 +2009,57 @@ def test_ap_wpa2_eap_fast_eap_aka(dev, apdev):
                 pac_file="blob://fast_pac_auth_aka",
                 ca_cert="auth_serv/ca.pem", phase2="auth=AKA")
     eap_reauth(dev[0], "FAST")
+
+def test_ap_wpa3_eap_peap_eap_mschapv2(dev, apdev):
+    """WPA3-Enterprise connection using EAP-PEAP/EAP-MSCHAPv2"""
+    check_eap_capa(dev[0], "MSCHAPV2")
+    params = hostapd.wpa2_eap_params(ssid="test-wpa2-eap")
+    params["wpa_key_mgmt"] = "WPA-EAP-SUITE-B-192"
+    params["rsn_pairwise"] = "GCMP-256"
+    params["group_mgmt_cipher"] = "BIP-GMAC-256"
+    params["ieee80211w"] = "2"
+    params["ieee8021x"] = "1"
+    params["openssl_ciphers"] = ["SUITEB192"]
+    params["eap_server"] = "1"
+    params["eap_user_file"] = "auth_serv/eap_user.conf"
+    params['tls_flags'] = "[ENABLE-TLSv1.3]"
+    params['tls_session_lifetime'] = "3600"
+    params["ca_cert"] = "auth_serv/ec2-ca.pem"
+    params["server_cert"] = "auth_serv/ec2-server.pem"
+    params["private_key"] = "auth_serv/ec2-server.key"
+    hapd = hostapd.add_ap(apdev[0], params)
+    eap_connect(dev[0], hapd, "PEAP", "user",
+                anonymous_identity="peap", password="password",
+                phase2="auth=MSCHAPV2",
+                openssl_ciphers="SUITEB192", ca_cert="auth_serv/ec2-ca.pem", client_cert="auth_serv/ec2-user.pem", private_key="auth_serv/ec2-user.key",
+                phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", pairwise="GCMP-256", group="GCMP-256")
+    hwsim_utils.test_connectivity(dev[0], hapd)
+    eap_reauth(dev[0], "PEAP")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], hapd, "PEAP", "user",
+                anonymous_identity="peap", password="password",
+                phase2="auth=MSCHAPV2",
+                fragment_size="200",
+                openssl_ciphers="SUITEB192", ca_cert="auth_serv/ec2-ca.pem", client_cert="auth_serv/ec2-user.pem", private_key="auth_serv/ec2-user.key",
+                phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", pairwise="GCMP-256", group="GCMP-256")
+
+    logger.info("Password as hash value")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], hapd, "PEAP", "user",
+                anonymous_identity="peap",
+                password_hex="hash:8846f7eaee8fb117ad06bdd830b7586c",
+                phase2="auth=MSCHAPV2",
+                openssl_ciphers="SUITEB192", ca_cert="auth_serv/ec2-ca.pem", client_cert="auth_serv/ec2-user.pem", private_key="auth_serv/ec2-user.key",
+                phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", pairwise="GCMP-256", group="GCMP-256")
+
+    logger.info("Negative test with incorrect password")
+    dev[0].request("REMOVE_NETWORK all")
+    eap_connect(dev[0], hapd, "PEAP", "user",
+                anonymous_identity="peap", password="password1",
+                phase2="auth=MSCHAPV2",
+                expect_failure=True,
+                openssl_ciphers="SUITEB192", ca_cert="auth_serv/ec2-ca.pem", client_cert="auth_serv/ec2-user.pem", private_key="auth_serv/ec2-user.key",
+                phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0", pairwise="GCMP-256", group="GCMP-256")
 
 def test_ap_wpa2_eap_peap_eap_mschapv2(dev, apdev):
     """WPA2-Enterprise connection using EAP-PEAP/EAP-MSCHAPv2"""
@@ -5795,8 +5860,8 @@ def suite_b_192_ap_params():
               "eap_user_file": "auth_serv/eap_user.conf",
               "ca_cert": "auth_serv/ec2-ca.pem",
               "server_cert": "auth_serv/ec2-server.pem",
-              "private_key": "auth_serv/ec2-server.key"}
-              #"tls_flags": "[ENABLE-TLSv1.3]"}
+              "private_key": "auth_serv/ec2-server.key",
+              "tls_flags": "[ENABLE-TLSv1.3]"}
     return params
 
 def test_ap_wpa3_eap_tls_13(dev, apdev):
@@ -5813,7 +5878,7 @@ def test_ap_wpa3_eap_tls_13(dev, apdev):
                      ca_cert="auth_serv/ca.pem",
                      client_cert="auth_serv/user.pem",
                      private_key="auth_serv/user.key",
-                     phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=0 tls_disable_tlsv1_3=1")
+                     phase1="tls_disable_tlsv1_0=1 tls_disable_tlsv1_1=1 tls_disable_tlsv1_2=1 tls_disable_tlsv1_3=0")
     ver = dev[0].get_status_field("eap_tls_version")
     if ver != "TLSv1.3":
         raise Exception("Unexpected TLS version")

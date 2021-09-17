@@ -20,6 +20,7 @@
 #include <wolfssl/error-ssl.h>
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/openssl/x509v3.h>
+#include <wolfssl/internal.h>
 #include <stdbool.h>
 
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || defined(EAP_SERVER_FAST)
@@ -39,7 +40,7 @@
 
 static int tls_ref_count = 0;
 
-static int tls_ex_idx_session = 0;
+static int tls_ex_idx_session = 4;
 
 
 /* tls input data for wolfSSL Read Callback */
@@ -181,7 +182,7 @@ static void remove_session_cb(WOLFSSL_CTX *ctx, WOLFSSL_SESSION *sess)
 {
 	struct wpabuf *buf;
 
-	buf = wolfSSL_SESSION_get_ex_data(sess, tls_ex_idx_session);
+	buf = wolfSSL_CTX_get_ex_data(ctx, tls_ex_idx_session);
 	if (!buf)
 		return;
 	wpa_printf(MSG_DEBUG,
@@ -189,7 +190,7 @@ static void remove_session_cb(WOLFSSL_CTX *ctx, WOLFSSL_SESSION *sess)
 		   buf, sess);
 	wpabuf_free(buf);
 
-	wolfSSL_SESSION_set_ex_data(sess, tls_ex_idx_session, NULL);
+	wolfSSL_CTX_set_ex_data(ctx, tls_ex_idx_session, NULL);
 }
 
 void wolfSSL_logging_cb(const int logLevel, const char *const logMessage)
@@ -1858,7 +1859,7 @@ struct wpabuf * tls_connection_decrypt(void *tls_ctx,
 
 		if (err == SSL_ERROR_WANT_READ) {
 			wpa_printf(MSG_DEBUG,
-				   "SSL: SSL_connect - want more data");
+				   "SSL: SSL_read - want more data");
 			res = 0;
 		} else {
 			wpa_printf(MSG_INFO, "Decryption failed - SSL_read");
@@ -2266,25 +2267,19 @@ const char * tls_connection_get_peer_subject(struct tls_connection *conn)
 void tls_connection_set_success_data(struct tls_connection *conn,
 				     struct wpabuf *data)
 {
-	WOLFSSL_SESSION *sess;
+	WOLFSSL_CTX *ctx;
 	struct wpabuf *old;
 
 	wpa_printf(MSG_DEBUG, "wolfSSL: Set success data");
+	ctx = conn->ssl->ctx;
 
-	sess = wolfSSL_get_session(conn->ssl);
-	if (!sess) {
-		wpa_printf(MSG_DEBUG,
-			   "wolfSSL: No session found for success data");
-		goto fail;
-	}
-
-	old = wolfSSL_SESSION_get_ex_data(sess, tls_ex_idx_session);
+	old = wolfSSL_CTX_get_ex_data(ctx, tls_ex_idx_session);
 	if (old) {
 		wpa_printf(MSG_DEBUG, "wolfSSL: Replacing old success data %p",
 			   old);
 		wpabuf_free(old);
 	}
-	if (wolfSSL_SESSION_set_ex_data(sess, tls_ex_idx_session, data) != 1)
+	if (wolfSSL_CTX_set_ex_data(ctx, tls_ex_idx_session, data) != 1)
 		goto fail;
 
 	wpa_printf(MSG_DEBUG, "wolfSSL: Stored success data %p", data);
@@ -2300,14 +2295,9 @@ fail:
 const struct wpabuf *
 tls_connection_get_success_data(struct tls_connection *conn)
 {
-	WOLFSSL_SESSION *sess;
-
 	wpa_printf(MSG_DEBUG, "wolfSSL: Get success data");
 
-	sess = wolfSSL_get_session(conn->ssl);
-	if (!sess)
-		return NULL;
-	return wolfSSL_SESSION_get_ex_data(sess, tls_ex_idx_session);
+	return wolfSSL_CTX_get_ex_data(conn->ssl->ctx, tls_ex_idx_session);
 }
 
 

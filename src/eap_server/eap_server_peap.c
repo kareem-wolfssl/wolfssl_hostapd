@@ -528,7 +528,6 @@ static struct wpabuf * eap_peap_build_phase2_term(struct eap_sm *sm,
 	wpabuf_put_buf(data->ssl.tls_out, encr_req);
 	wpa_hexdump_buf(MSG_DEBUG,
 			"EAP-PEAP: Data appended to the message", encr_req);
-	os_free(encr_req);
 
 	return data->ssl.tls_out;
 }
