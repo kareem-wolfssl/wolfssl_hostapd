@@ -99,63 +99,6 @@ struct tls_connection {
     char *peer_subject; /* peer subject info for authenticated peer */
 };
 
-#ifndef WOLFSSL_SSLKEYLOGFILE_OUTPUT
-    #define WOLFSSL_SSLKEYLOGFILE_OUTPUT "sslkeylog.log"
-#endif
-
-
-/* Callback function for TLS v1.3 secrets for use with Wireshark */
-static int Tls13SecretCallback(WOLFSSL* ssl, int id, const unsigned char* secret,
-    int secretSz, void* ctx)
-{
-    int i;
-    const char* str = NULL;
-    unsigned char clientRandom[32];
-    size_t clientRandomSz;
-    XFILE fp = stderr;
-    if (ctx) {
-        fp = XFOPEN((const char*)ctx, "ab");
-        if (fp == XBADFILE) {
-            return BAD_FUNC_ARG;
-        }
-    }
-
-    clientRandomSz = wolfSSL_get_client_random(ssl, clientRandom,
-        sizeof(clientRandom));
-
-    switch (id) {
-        case CLIENT_EARLY_TRAFFIC_SECRET:
-            str = "CLIENT_EARLY_TRAFFIC_SECRET"; break;
-        case EARLY_EXPORTER_SECRET:
-            str = "EARLY_EXPORTER_SECRET"; break;
-        case CLIENT_HANDSHAKE_TRAFFIC_SECRET:
-            str = "CLIENT_HANDSHAKE_TRAFFIC_SECRET"; break;
-        case SERVER_HANDSHAKE_TRAFFIC_SECRET:
-            str = "SERVER_HANDSHAKE_TRAFFIC_SECRET"; break;
-        case CLIENT_TRAFFIC_SECRET:
-            str = "CLIENT_TRAFFIC_SECRET_0"; break;
-        case SERVER_TRAFFIC_SECRET:
-            str = "SERVER_TRAFFIC_SECRET_0"; break;
-        case EXPORTER_SECRET:
-            str = "EXPORTER_SECRET"; break;
-    }
-
-    fprintf(fp, "%s ", str);
-    for (i = 0; i < (int)clientRandomSz; i++) {
-        fprintf(fp, "%02x", clientRandom[i]);
-    }
-    fprintf(fp, " ");
-    for (i = 0; i < secretSz; i++) {
-        fprintf(fp, "%02x", secret[i]);
-    }
-    fprintf(fp, "\n");
-
-    if (fp != stderr) {
-        XFCLOSE(fp);
-    }
-
-    return 0;
-}
 
 static struct tls_context * tls_context_new(const struct tls_config *conf)
 {
@@ -385,8 +328,6 @@ struct tls_connection * tls_connection_init(void *tls_ctx)
 		return NULL;
 	}
 
-	wolfSSL_set_tls13_secret_cb(conn->ssl, Tls13SecretCallback,
-        (void*)WOLFSSL_SSLKEYLOGFILE_OUTPUT);
 	wolfSSL_SetIOReadCtx(conn->ssl,  &conn->input);
 	wolfSSL_SetIOWriteCtx(conn->ssl, &conn->output);
 	wolfSSL_set_ex_data(conn->ssl, 0, conn);
