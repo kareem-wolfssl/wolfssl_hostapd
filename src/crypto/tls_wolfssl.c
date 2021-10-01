@@ -20,7 +20,6 @@
 #include <wolfssl/error-ssl.h>
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/openssl/x509v3.h>
-#include <wolfssl/internal.h>
 #include <stdbool.h>
 
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || defined(EAP_SERVER_FAST)
@@ -2271,7 +2270,7 @@ void tls_connection_set_success_data(struct tls_connection *conn,
 	struct wpabuf *old;
 
 	wpa_printf(MSG_DEBUG, "wolfSSL: Set success data");
-	ctx = conn->ssl->ctx;
+	ctx = wolfSSL_get_SSL_CTX(conn->ssl);
 
 	old = wolfSSL_CTX_get_ex_data(ctx, tls_ex_idx_session);
 	if (old) {
@@ -2297,7 +2296,7 @@ tls_connection_get_success_data(struct tls_connection *conn)
 {
 	wpa_printf(MSG_DEBUG, "wolfSSL: Get success data");
 
-	return wolfSSL_CTX_get_ex_data(conn->ssl->ctx, tls_ex_idx_session);
+	return wolfSSL_CTX_get_ex_data(wolfSSL_get_SSL_CTX(conn->ssl), tls_ex_idx_session);
 }
 
 
