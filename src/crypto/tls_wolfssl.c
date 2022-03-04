@@ -58,6 +58,7 @@ struct tls_context {
 	void *cb_ctx;
 	int cert_in_cb;
 	char *ocsp_stapling_response;
+    unsigned int tls_session_lifetime;
 };
 
 static struct tls_context *tls_global = NULL;
@@ -94,6 +95,7 @@ struct tls_connection {
 	WOLFSSL_X509 *peer_cert;
 	WOLFSSL_X509 *peer_issuer;
 	WOLFSSL_X509 *peer_issuer_issuer;
+    char *peer_subject; /* peer subject info for authenticated peer */
 };
 
 
@@ -189,6 +191,11 @@ static void remove_session_cb(WOLFSSL_CTX *ctx, WOLFSSL_SESSION *sess)
 	wolfSSL_SESSION_set_ex_data(sess, tls_ex_idx_session, NULL);
 }
 
+void wolfSSL_logging_cb(const int logLevel, const char *const logMessage)
+{
+	(void)logLevel;
+	wpa_printf(MSG_DEBUG, "wolfSSL log:%s", logMessage);
+}
 
 void * tls_init(const struct tls_config *conf)
 {
@@ -197,6 +204,7 @@ void * tls_init(const struct tls_config *conf)
 	const char *ciphers;
 
 #ifdef DEBUG_WOLFSSL
+	wolfSSL_SetLoggingCb(wolfSSL_logging_cb);
 	wolfSSL_Debugging_ON();
 #endif /* DEBUG_WOLFSSL */
 
@@ -227,17 +235,20 @@ void * tls_init(const struct tls_config *conf)
 	}
 	wolfSSL_SetIORecv(ssl_ctx, wolfssl_receive_cb);
 	wolfSSL_SetIOSend(ssl_ctx, wolfssl_send_cb);
+	context->tls_session_lifetime = conf->tls_session_lifetime;
 	wolfSSL_CTX_set_ex_data(ssl_ctx, 0, context);
 
 	if (conf->tls_session_lifetime > 0) {
+	    wolfSSL_CTX_set_session_id_context(ssl_ctx,
+	            (const unsigned char*)"hostapd", 7);
 		wolfSSL_CTX_set_quiet_shutdown(ssl_ctx, 1);
 		wolfSSL_CTX_set_session_cache_mode(ssl_ctx,
-						   SSL_SESS_CACHE_SERVER);
+		        WOLFSSL_SESS_CACHE_SERVER);
 		wolfSSL_CTX_set_timeout(ssl_ctx, conf->tls_session_lifetime);
 		wolfSSL_CTX_sess_set_remove_cb(ssl_ctx, remove_session_cb);
 	} else {
 		wolfSSL_CTX_set_session_cache_mode(ssl_ctx,
-						   SSL_SESS_CACHE_CLIENT);
+		        WOLFSSL_SESS_CACHE_OFF);
 	}
 
 	if (conf && conf->openssl_ciphers)
@@ -336,6 +347,7 @@ void tls_connection_deinit(void *tls_ctx, struct tls_connection *conn)
 	os_free(conn->alt_subject_match);
 	os_free(conn->suffix_match);
 	os_free(conn->domain_match);
+	os_free(conn->peer_subject);
 
 	/* self */
 	os_free(conn);
@@ -1134,6 +1146,11 @@ static int tls_verify_cb(int preverify_ok, WOLFSSL_X509_STORE_CTX *x509_ctx)
 		context->event_cb(context->cb_ctx,
 				  TLS_CERT_CHAIN_SUCCESS, NULL);
 
+    if (depth == 0 && preverify_ok) {
+        os_free(conn->peer_subject);
+        conn->peer_subject = os_strdup(buf);
+    }
+
 	return preverify_ok;
 }
 
@@ -1238,10 +1255,8 @@ static int tls_connection_ca_cert(void *tls_ctx, struct tls_connection *conn,
 static void tls_set_conn_flags(WOLFSSL *ssl, unsigned int flags)
 {
 #ifdef HAVE_SESSION_TICKET
-#if 0
 	if (!(flags & TLS_CONN_DISABLE_SESSION_TICKET))
 		wolfSSL_UseSessionTicket(ssl);
-#endif
 #endif /* HAVE_SESSION_TICKET */
 
 	if (flags & TLS_CONN_DISABLE_TLSv1_0)
@@ -1590,6 +1605,8 @@ int tls_connection_set_verify(void *ssl_ctx, struct tls_connection *conn,
 			      int verify_peer, unsigned int flags,
 			      const u8 *session_ctx, size_t session_ctx_len)
 {
+    static int counter = 0;
+    struct tls_context *context;
 	if (!conn)
 		return -1;
 
@@ -1606,6 +1623,23 @@ int tls_connection_set_verify(void *ssl_ctx, struct tls_connection *conn,
 	}
 
 	wolfSSL_set_accept_state(conn->ssl);
+
+	context = wolfSSL_CTX_get_ex_data((WOLFSSL_CTX*)ssl_ctx, 0);
+	if (context && context->tls_session_lifetime == 0) {
+        /*
+         * Set session id context to a unique value to make sure
+         * session resumption cannot be used either through session
+         * caching or TLS ticket extension.
+         */
+        counter++;
+        wolfSSL_set_session_id_context(conn->ssl,
+                       (const unsigned char *) &counter,
+                       sizeof(counter));
+	}
+	else
+        wolfSSL_set_session_id_context(conn->ssl, session_ctx,
+                session_ctx_len);
+	(void)context;
 
 	/* TODO: do we need to fake a session like OpenSSL does here? */
 
@@ -2160,6 +2194,39 @@ void tls_connection_remove_session(struct tls_connection *conn)
 }
 
 
+int tls_get_tls_unique(struct tls_connection *conn, u8 *buf, size_t max_len)
+{
+    size_t len;
+    int reused;
+
+    reused = wolfSSL_session_reused(conn->ssl);
+    if ((wolfSSL_is_server(conn->ssl) && !reused) ||
+            (!wolfSSL_is_server(conn->ssl) && reused))
+        len = wolfSSL_get_peer_finished(conn->ssl, buf, max_len);
+    else
+        len = wolfSSL_get_finished(conn->ssl, buf, max_len);
+
+    if (len == 0 || len > max_len)
+        return -1;
+
+    return len;
+}
+
+
+u16 tls_connection_get_cipher_suite(struct tls_connection *conn)
+{
+    return (u16)wolfSSL_get_current_cipher_suite(conn->ssl);
+}
+
+
+const char * tls_connection_get_peer_subject(struct tls_connection *conn)
+{
+    if (conn)
+        return conn->peer_subject;
+    return NULL;
+}
+
+
 void tls_connection_set_success_data(struct tls_connection *conn,
 				     struct wpabuf *data)
 {
@@ -2205,4 +2272,12 @@ tls_connection_get_success_data(struct tls_connection *conn)
 	if (!sess)
 		return NULL;
 	return wolfSSL_SESSION_get_ex_data(sess, tls_ex_idx_session);
+}
+
+
+bool tls_connection_get_own_cert_used(struct tls_connection *conn)
+{
+    if (conn)
+        return wolfSSL_get_certificate(conn->ssl) != NULL;
+    return false;
 }
