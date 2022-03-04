@@ -21,6 +21,12 @@
 #include <wolfssl/wolfcrypt/asn.h>
 #include <wolfssl/openssl/x509v3.h>
 
+#include <wolfssl/wolfcrypt/port/iotsafe/iotsafe.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <termios.h>
+
 #if defined(EAP_FAST) || defined(EAP_FAST_DYNAMIC) || defined(EAP_SERVER_FAST)
 #define HAVE_AESGCM
 #include <wolfssl/wolfcrypt/aes.h>
@@ -39,6 +45,17 @@
 static int tls_ref_count = 0;
 
 static int tls_ex_idx_session = 0;
+
+static int global_serial_fd;
+struct pollfd *pfd;
+
+#ifdef DEBUG_UART_IO
+static void print_buffer_hex(const char *buf, int len);
+static void print_buffer_char(const char *buf, int len);
+#endif
+static int usart_init(const char *dev_name, int *fd);
+static int usart_read(char *buf, int len);
+static int usart_write(const char *buf, int len);
 
 
 /* tls input data for wolfSSL Read Callback */
@@ -197,11 +214,129 @@ void wolfSSL_logging_cb(const int logLevel, const char *const logMessage)
 	wpa_printf(MSG_DEBUG, "wolfSSL log:%s", logMessage);
 }
 
+/* Added the uart_read and uart_write functions */
+
+/* Function Definitions */
+#ifdef DEBUG_UART_IO
+static void print_buffer_hex(const char *buf, int len)
+{
+    for (int i = 0; i < len; i++)
+        printf("%02X", (unsigned int)*(buf++));
+}
+
+static void print_buffer_char(const char *buf, int len)
+{
+    for (int i = 0; i < len; i++)
+        printf("%c", *(buf++));
+}
+#endif
+
+static int usart_read(char *buf, int len)
+{
+    if (!buf || len < 0)
+        return -1;
+
+#ifdef DEBUG_UART_IO
+    printf("UART Read Expected : %d bytes\n", len);
+#endif
+
+    int ret = 0;
+    int i = 0;
+    char c;
+    memset(buf, 0, len);
+
+   /* Read 1 byte at one time until *buf is full or a POSIX read error like
+    * timeout occurs. */
+    do
+    {
+        ret = read(global_serial_fd, &c, 1U);
+        if (ret > 0) {
+            buf[i++] = c;
+            if (c == '\n')
+                break;
+        }
+    } while (i < len && ret > 0);
+
+#ifdef DEBUG_UART_IO
+    printf("UART Read Actual   : %d bytes\n", i);
+    #ifdef DEBUG_UART_IO_EXTRA_VERBOSE
+    printf("[READ in HEX ]  <- ");
+    print_buffer_hex(buf, i);
+    printf("\n");
+    #endif
+    printf("[READ in CHAR]  <- ");
+    print_buffer_char(buf, i);
+    printf("\n");
+#endif
+
+    return i;
+}
+
+static int usart_write(const char *buf, int len)
+{
+    if (!buf || len < 0)
+        return -1;
+
+#ifdef DEBUG_UART_IO
+    printf("UART Write Expected: %d bytes\n", len);
+#endif
+
+    int sent = write(global_serial_fd, buf, len);
+
+    if (sent < 0)
+        sent = 0;
+
+#ifdef DEBUG_UART_IO
+    printf("UART Write Actual  : %d bytes\n", sent);
+    #ifdef DEBUG_UART_IO_EXTRA_VERBOSE
+    printf("[WRITE in HEX ] -> ");
+    print_buffer_hex(buf, sent);
+    printf("\n");
+    #endif
+    printf("[WRITE in CHAR] -> ");
+    print_buffer_char(buf, sent);
+    printf("\n");
+#endif
+
+    return sent;
+}
+
+static int uart_init(const char *dev_name, int *fd)
+{
+    int portfd = open(dev_name, O_RDWR | O_NOCTTY);
+    if (portfd < 0)
+    {
+        *fd = -1;
+        return errno;
+    }
+
+    struct termios tty;
+    tcgetattr(portfd, &tty);
+    cfsetospeed(&tty, B115200);
+    cfsetispeed(&tty, B115200);
+    tty.c_cflag = (tty.c_cflag & ~CSIZE) | (CS8);
+    tty.c_iflag &= ~(IGNBRK | IXON | IXOFF | IXANY| INLCR | ICRNL);
+    tty.c_oflag &= ~OPOST;
+    tty.c_oflag &= ~(ONLCR|OCRNL);
+    tty.c_cflag &= ~(PARENB | PARODD | CSTOPB);
+    tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+    tty.c_iflag &= ~ISTRIP;
+    tty.c_cc[VMIN] = 0;
+    tty.c_cc[VTIME] = 5;
+    tcsetattr(portfd, TCSANOW, &tty);
+
+    *fd = portfd;
+
+    return 0;
+}
+
+
 void * tls_init(const struct tls_config *conf)
 {
 	WOLFSSL_CTX *ssl_ctx;
 	struct tls_context *context;
 	const char *ciphers;
+	int ret = -1;
 
 #ifdef DEBUG_WOLFSSL
 	wolfSSL_SetLoggingCb(wolfSSL_logging_cb);
@@ -220,6 +355,7 @@ void * tls_init(const struct tls_config *conf)
 		/* wolfSSL_Debugging_ON(); */
 	}
 
+
 	tls_ref_count++;
 
 	/* start as client */
@@ -233,6 +369,24 @@ void * tls_init(const struct tls_config *conf)
 			tls_global = NULL;
 		}
 	}
+
+	pfd = os_malloc(sizeof *pfd);
+
+	printf("Opening /dev/ttyUSB2\n");
+    if ((ret = uart_init("/dev/ttyUSB2", &global_serial_fd)) != 0)
+    {
+        printf("ERROR: Error opening /dev/ttyUSB2: Error %i (%s)\n",
+        	   ret, strerror(ret));
+        exit(-1);
+    }
+
+	wolfIoTSafe_SetCSIM_read_cb(usart_read);
+	wolfIoTSafe_SetCSIM_write_cb(usart_write);
+	ret = wolfSSL_CTX_iotsafe_enable(ssl_ctx);
+	if (ret != 0) {
+		wpa_printf(MSG_INFO, "wolfSSL: wolfSSL_CTX_iotsafe_enable ret %d", ret);
+	}
+
 	wolfSSL_SetIORecv(ssl_ctx, wolfssl_receive_cb);
 	wolfSSL_SetIOSend(ssl_ctx, wolfssl_send_cb);
 	context->tls_session_lifetime = conf->tls_session_lifetime;
@@ -302,7 +456,6 @@ int tls_get_errors(void *tls_ctx)
 	return 0;
 }
 
-
 struct tls_connection * tls_connection_init(void *tls_ctx)
 {
 	WOLFSSL_CTX *ssl_ctx = tls_ctx;
@@ -313,11 +466,21 @@ struct tls_connection * tls_connection_init(void *tls_ctx)
 	conn = os_zalloc(sizeof(*conn));
 	if (!conn)
 		return NULL;
+
 	conn->ssl = wolfSSL_new(ssl_ctx);
 	if (!conn->ssl) {
 		os_free(conn);
 		return NULL;
 	}
+
+	/* Added - JB
+	 *  arg 1 should be private key slot (Keyslot 0x01)
+	 *  arg 2 should be slot for ECDH keypair (key slot 0x04)
+	 *  arg 3 should be slot for ECDH public key (key slot 0x0e)
+	 *  arg 4 should be cert/public key of the other endpoint (file slot 0x0c)
+	 *
+	 */
+	wolfSSL_iotsafe_on(conn->ssl, 0x01, 0x04, 0x0e, 0x0c);
 
 	wolfSSL_SetIOReadCtx(conn->ssl,  &conn->input);
 	wolfSSL_SetIOWriteCtx(conn->ssl, &conn->output);
@@ -332,7 +495,6 @@ struct tls_connection * tls_connection_init(void *tls_ctx)
 
 	return conn;
 }
-
 
 void tls_connection_deinit(void *tls_ctx, struct tls_connection *conn)
 {
@@ -478,6 +640,34 @@ static int tls_connection_client_cert(struct tls_connection *conn,
 	if (!client_cert && !client_cert_blob)
 		return 0;
 
+	/* Substitute the iotSafe stored cert for client_cert */
+	uint32_t cert_buffer_size;
+	uint8_t cert_buffer[2048];
+	uint8_t *cert_buffer_end;
+	int i;
+	int client_cert_file_id = 0x02;
+
+	WOLFSSL_CTX *ctx = wolfSSL_get_SSL_CTX(conn->ssl);
+
+	printf("Attempting to getCert from iotSafe\n");
+	cert_buffer_size = wolfIoTSafe_GetCert(client_cert_file_id, cert_buffer, 2048);
+
+	if (cert_buffer_size < 1) {
+		printf("Bad client cert from IotSafe\n");
+		return -1;
+	}
+
+	printf("Loaded client cert from iotSafe for tls_connection_client_cert\n");
+
+	if (wolfSSL_use_certificate_chain_buffer_format(conn->ssl, cert_buffer,
+				cert_buffer_size, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS){
+		printf("Error: Cannot load client cert\n");
+		return -1;
+	}
+
+	printf("Client certificate from IotSafe successfully imported.\n");
+
+	/*
 	if (client_cert_blob) {
 		if (wolfSSL_use_certificate_chain_buffer_format(
 			    conn->ssl, client_cert_blob, blob_len,
@@ -489,6 +679,7 @@ static int tls_connection_client_cert(struct tls_connection *conn,
 		wpa_printf(MSG_DEBUG, "SSL: use client cert blob OK");
 		return 0;
 	}
+
 
 	if (client_cert) {
 		if (wolfSSL_use_certificate_chain_file(
@@ -506,6 +697,7 @@ static int tls_connection_client_cert(struct tls_connection *conn,
 		wpa_printf(MSG_DEBUG, "SSL: use client cert file OK");
 		return 0;
 	}
+	*/
 
 	return 0;
 }
@@ -527,7 +719,7 @@ static int tls_connection_private_key(void *tls_ctx,
 				      const u8 *private_key_blob,
 				      size_t blob_len)
 {
-	WOLFSSL_CTX *ctx = tls_ctx;
+	/*WOLFSSL_CTX *ctx = tls_ctx;
 	char *passwd = NULL;
 	int ok = 0;
 
@@ -580,7 +772,10 @@ static int tls_connection_private_key(void *tls_ctx,
 	os_free(passwd);
 
 	if (!ok)
-		return -1;
+		return -1;*/
+
+	wpa_printf(MSG_INFO, "tls_connection_private_key: Skipping setup,"
+						 "using IotSafe keys");
 
 	return 0;
 }
@@ -1165,7 +1360,28 @@ static int tls_connection_ca_cert(void *tls_ctx, struct tls_connection *conn,
 	wolfSSL_set_verify(conn->ssl, SSL_VERIFY_PEER, tls_verify_cb);
 	conn->ca_cert_verify = 1;
 
-	if (ca_cert && os_strncmp(ca_cert, "probe://", 8) == 0) {
+	/* Substitute the iotSafe stored cert for ca_cert */
+	uint32_t cert_buffer_size;
+	uint8_t cert_buffer[2048];
+	int ca_cert_file_id = 0x07;
+	uint8_t* cert_buffer_end;
+
+	cert_buffer_size = wolfIoTSafe_GetCert(ca_cert_file_id, cert_buffer, sizeof(cert_buffer));
+
+	if (cert_buffer_size < 1) {
+		printf("Bad CA cert from IotSafe\n");
+		return -1;
+	}
+
+	if (wolfSSL_CTX_load_verify_buffer(ctx, cert_buffer,
+				cert_buffer_size, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS){
+		printf("Error: Cannot load CA cert\n");
+		return -1;
+	}
+
+	printf("CA certificate from IotSafe successfully imported.\n");
+
+	/*if (ca_cert && os_strncmp(ca_cert, "probe://", 8) == 0) {
 		wpa_printf(MSG_DEBUG,
 			   "wolfSSL: Probe for server certificate chain");
 		conn->cert_probe = 1;
@@ -1200,11 +1416,11 @@ static int tls_connection_ca_cert(void *tls_ctx, struct tls_connection *conn,
 		wpa_printf(MSG_DEBUG,
 			   "wolfSSL: Checking only server certificate match");
 		return 0;
-#else /* CONFIG_SHA256 */
+#else * CONFIG_SHA256 *
 		wpa_printf(MSG_INFO,
 			   "No SHA256 included in the build - cannot validate server certificate hash");
 		return -1;
-#endif /* CONFIG_SHA256 */
+#endif * CONFIG_SHA256 *
 	}
 
 	if (ca_cert_blob) {
@@ -1245,7 +1461,7 @@ static int tls_connection_ca_cert(void *tls_ctx, struct tls_connection *conn,
 			}
 		}
 		return 0;
-	}
+	}*/
 
 	conn->ca_cert_verify = 0;
 	return 0;
@@ -1367,7 +1583,29 @@ static int tls_global_ca_cert(void *ssl_ctx, const char *ca_cert)
 {
 	WOLFSSL_CTX *ctx = ssl_ctx;
 
-	if (ca_cert) {
+	/* Substitute the iotSafe stored cert for ca_cert */
+	uint32_t cert_buffer_size;
+	uint8_t cert_buffer[2048];
+	int ca_cert_file_id = 0x07;
+	uint8_t* cert_buffer_end;
+
+	cert_buffer_size = wolfIoTSafe_GetCert(ca_cert_file_id, cert_buffer, sizeof(cert_buffer));
+
+	if (cert_buffer_size < 1) {
+		printf("Bad CA cert from IotSafe\n");
+		return -1;
+	}
+
+	if (wolfSSL_CTX_load_verify_buffer(ctx, cert_buffer,
+				cert_buffer_size, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS){
+
+		printf("Error: Cannot load CA cert\n");
+		return -1;
+	}
+
+	printf("CA certificate from IotSafe successfully imported.\n");
+
+	/*if (ca_cert) {
 		if (wolfSSL_CTX_load_verify_locations(ctx, ca_cert, NULL) != 1)
 		{
 			wpa_printf(MSG_WARNING,
@@ -1377,18 +1615,41 @@ static int tls_global_ca_cert(void *ssl_ctx, const char *ca_cert)
 
 		wpa_printf(MSG_DEBUG,
 			   "TLS: Trusted root certificate(s) loaded");
-	}
+	}*/
 
 	return 0;
 }
 
-
 static int tls_global_client_cert(void *ssl_ctx, const char *client_cert)
 {
-	WOLFSSL_CTX *ctx = ssl_ctx;
+	/*WOLFSSL_CTX *ctx = ssl_ctx;*/
 
 	if (!client_cert)
 		return 0;
+
+	/* Substitute the iotSafe stored cert for client_cert */
+	uint32_t cert_buffer_size;
+	uint8_t cert_buffer[2048];
+	int client_cert_file_id = 0x02;
+	uint8_t* cert_buffer_end;
+
+	cert_buffer_size = wolfIoTSafe_GetCert(client_cert_file_id, cert_buffer, sizeof(cert_buffer));
+
+	if (cert_buffer_size < 1) {
+		printf("Bad client cert from IotSafe\n");
+		return -1;
+	}
+
+	if (wolfSSL_CTX_use_certificate_chain_buffer_format(ssl_ctx, cert_buffer,
+				cert_buffer_size, WOLFSSL_FILETYPE_ASN1) != WOLFSSL_SUCCESS){
+
+		printf("Error: Cannot load client cert\n");
+		return -1;
+	}
+
+	printf("Client certificate from IotSafe successfully imported.\n");
+
+	/*
 
 	if (wolfSSL_CTX_use_certificate_chain_file_format(ctx, client_cert,
 							  SSL_FILETYPE_ASN1) !=
@@ -1401,6 +1662,7 @@ static int tls_global_client_cert(void *ssl_ctx, const char *client_cert)
 
 	wpa_printf(MSG_DEBUG, "SSL: Loaded global client certificate: %s",
 		   client_cert);
+	*/
 
 	return 0;
 }
@@ -1409,11 +1671,11 @@ static int tls_global_client_cert(void *ssl_ctx, const char *client_cert)
 static int tls_global_private_key(void *ssl_ctx, const char *private_key,
 				  const char *private_key_passwd)
 {
-	WOLFSSL_CTX *ctx = ssl_ctx;
-	char *passwd = NULL;
+	//WOLFSSL_CTX *ctx = ssl_ctx;
+	//char *passwd = NULL;
 	int ret = 0;
 
-	if (!private_key)
+	/*if (!private_key)
 		return 0;
 
 	if (private_key_passwd) {
@@ -1436,7 +1698,9 @@ static int tls_global_private_key(void *ssl_ctx, const char *private_key,
 	wpa_printf(MSG_DEBUG, "SSL: Loaded global private key");
 
 	os_free(passwd);
-	wolfSSL_CTX_set_default_passwd_cb(ctx, NULL);
+	wolfSSL_CTX_set_default_passwd_cb(ctx, NULL);*/
+	wpa_printf(MSG_INFO, "tls_global_private_key: Skipping setup,"
+						 "using IotSafe keys");
 
 	return ret;
 }
